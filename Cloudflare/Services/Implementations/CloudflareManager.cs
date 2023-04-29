@@ -69,21 +69,85 @@ namespace CloudflareDynDns.Cloudflare.Services.Implementations
 
         public async Task<bool> RefreshDNSRecords() 
         {
-            var zoneExists = await CheckIfZoneExists();
+            var refreshResult = await RefreshPublicIPAddress();
+
+            var zoneExists = await CheckIfZoneExistsAsync(_config.ZoneId);
             if (!zoneExists) return false;
 
+            var existingDnsRecords = await GetExistingDnsRecordsAsync(_config.ZoneId);
+            if (existingDnsRecords?.Success != true) return false;
 
+            foreach (var configDnsRecord in _config.Subdomains)
+            {
+                await ProcessDnsRecordRefresh(existingDnsRecords, configDnsRecord, refreshResult.requiresDnsRefresh);
+            }
 
             return true;
         }
 
-        private async Task<bool> CheckIfZoneExists() 
+        private async Task ProcessDnsRecordRefresh(DnsRecordsResponse existingDnsRecords, CloudflareSubdomain configDnsRecord, bool ipAddressChanged)
+        {
+            var existingDnsRecord = existingDnsRecords.Result.FirstOrDefault(x => x.Name.ToLower() == configDnsRecord.DnsZoneIdentifier.ToLower());
+            if (existingDnsRecord != null)
+            {
+                _logger.LogInformation($"Existing record: {configDnsRecord.Name}");
+                await UpdateExistingDnsRecord(existingDnsRecord, configDnsRecord, ipAddressChanged);
+            }
+            else
+            {
+                _logger.LogInformation($"New record: {configDnsRecord.Name}");
+                await CreateNewDnsRecord(configDnsRecord, ipAddressChanged);
+            }
+        }
+
+        private async Task CreateNewDnsRecord(CloudflareSubdomain configDnsRecord, bool ipAddressChanged)
+        {
+        }
+
+        private async Task UpdateExistingDnsRecord(DnsRecord existingDnsRecord, CloudflareSubdomain configDnsRecord, bool ipAddressChanged)
+        {
+            var now = DateTime.UtcNow;
+            var shouldBeUpdatedOn = existingDnsRecord.ModifiedOn.Add(TimeSpan.FromSeconds(_config.TTL));
+
+            if (shouldBeUpdatedOn < now || existingDnsRecord.Content != PublicIP || ipAddressChanged)
+            {
+                _logger.LogInformation($"Updating Subdomain {configDnsRecord.Name} - previous update on {existingDnsRecord.ModifiedOn}, " +
+                    $"public ip - old: {existingDnsRecord.Content}, new: {PublicIP}");
+                
+                var response = await _cloudflareApi.Patch<PatchDnsZoneResponse>($"zones/{_config.ZoneId}/dns_records/{existingDnsRecord.Id}", new() {
+                    { "content", PublicIP },
+                    { "name", existingDnsRecord.Name },
+                    { "type", existingDnsRecord.Type },
+                    { "comment", $"CloudflareDynDNS .NET tool rocks!" }
+                }, _headers);
+                if (response.Success)
+                {
+                    _logger.LogInformation($"Successfully updated {configDnsRecord.Name} with new ip address!");
+                }
+                else
+                {
+                    _logger.LogError($"Failure during updating bound ip for {configDnsRecord.Name}, will retry after {_config.TTL} seconds!");
+                }
+            }
+            else
+            {
+                _logger.LogInformation($"Subdomain {configDnsRecord.Name} was updated recently ({existingDnsRecord.ModifiedOn}) and public ip didn't change, skipping...");
+            }
+        }
+
+        private async Task<bool> CheckIfZoneExistsAsync(string zoneId) 
         {
             if (!CanHandleRequests) return false;
 
-            var response = await _cloudflareApi.Get<ZoneDetailsResponse>($"zones/{_config.ZoneId}", _headers);
+            var response = await _cloudflareApi.Get<ZoneDetailsResponse>($"zones/{zoneId}", _headers);
 
             return response.Success;
+        }
+
+        private async Task<DnsRecordsResponse> GetExistingDnsRecordsAsync(string zoneId) 
+        {
+            if (!CanHandleRequests) return null;
+            return await _cloudflareApi.Get<DnsRecordsResponse>($"zones/{zoneId}/dns_records", _headers);
         }
 
         private void PrepareDefaultRequestHeaders()
@@ -95,25 +159,34 @@ namespace CloudflareDynDns.Cloudflare.Services.Implementations
             };
         }
 
-        public async Task<string> RefreshPublicIPAddress()
+        public async Task<(bool requiresDnsRefresh, string ipAddress)> RefreshPublicIPAddress()
         {
-            if (!CanHandleRequests) return string.Empty;
+            if (!CanHandleRequests) return (false, string.Empty);
 
             string publicIp = "0.0.0.0";
             const string ddnsHost = "https://v4.ident.me";
             try
             {
+                _logger.LogInformation($"Checking current public IP...");
+                string prevPublicIp = PublicIP;
                 using (var response = await _httpClient.GetAsync(ddnsHost))
                 {
                     publicIp = await GetPublicIpFromResponse(response);
                 }
                 _publicIP = publicIp;
+
+                bool arePreviousAndNewIpEqual = prevPublicIp != PublicIP;
+                if (arePreviousAndNewIpEqual) 
+                {
+                    _logger.LogInformation($"Public IP changed (old: {prevPublicIp}, new: {PublicIP}), refreshing DNS configuration...");
+                }
+                return (arePreviousAndNewIpEqual, PublicIP);
             }
             catch (Exception ex)
             {
                 _logger.LogError($"{ex}");
+                return (false, publicIp);
             }
-            return publicIp;
         }
 
         private async Task<string> GetPublicIpFromResponse(HttpResponseMessage message)

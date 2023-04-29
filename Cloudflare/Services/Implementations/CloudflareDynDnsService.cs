@@ -48,7 +48,8 @@ namespace CloudflareDynDns.Cloudflare.Services.Implementations
                 {
                     _logger.LogWarning($"Failure during processing DNS records update!");
                 }
-                await Task.Delay(ttlResponse.TTL);
+                // await Task.Delay(ttlResponse.TTL);
+                await Task.Delay(3000);
                 _logger.LogInformation($"Processing Subdomains from the configuration, TTL of {ttlResponse.TTL.TotalSeconds} seconds ellapsed...");
             }
         }

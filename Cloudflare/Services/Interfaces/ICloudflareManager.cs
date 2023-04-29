@@ -7,7 +7,7 @@ namespace CloudflareDynDns.Cloudflare.Services.Interfaces
         bool CanHandleRequests {get;}
 
         Task LoadConfiguration(string configurationFile = "config.json");
-        Task<string> RefreshPublicIPAddress();
+        Task<(bool requiresDnsRefresh, string ipAddress)> RefreshPublicIPAddress();
         Task<bool> VerifyCloudflareToken();
         Task<bool> RefreshDNSRecords();
         

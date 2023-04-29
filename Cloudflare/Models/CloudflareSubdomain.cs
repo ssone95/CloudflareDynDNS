@@ -11,5 +11,7 @@ namespace CloudflareDynDns.Cloudflare.Models
         public string Name {get;set;}
         [JsonProperty("proxied")]
         public bool Proxied {get;set;}
+
+        public string DnsZoneIdentifier => $"{Name}.{Domain}";
     }
 }

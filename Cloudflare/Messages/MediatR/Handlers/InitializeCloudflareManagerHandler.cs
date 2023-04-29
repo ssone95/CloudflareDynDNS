@@ -37,7 +37,7 @@ namespace CloudflareDynDns.Cloudflare.Messages.MediatR.Handlers
             bool tokenValidationSucceeded = await _manager.VerifyCloudflareToken();
             _logger.LogInformation($"Token validated: {tokenValidationSucceeded}");
 
-            var isEverythingOk = IsEverythingValidAtStartup(publicIp, _manager.LoadedConfiguration, tokenValidationSucceeded);
+            var isEverythingOk = IsEverythingValidAtStartup(publicIp.ipAddress, _manager.LoadedConfiguration, tokenValidationSucceeded);
             return new(isEverythingOk);
         }
 
