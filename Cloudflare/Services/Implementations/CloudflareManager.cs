@@ -87,7 +87,7 @@ namespace CloudflareDynDns.Cloudflare.Services.Implementations
 
         private async Task ProcessDnsRecordRefresh(DnsRecordsResponse existingDnsRecords, CloudflareSubdomain configDnsRecord, bool ipAddressChanged)
         {
-            var existingDnsRecord = existingDnsRecords.Result.FirstOrDefault(x => x.Name.ToLower() == configDnsRecord.DnsZoneIdentifier.ToLower());
+            var existingDnsRecord = existingDnsRecords.Result.FirstOrDefault(x => x.Name.ToLower() == configDnsRecord.Name.ToLower());
             if (existingDnsRecord != null)
             {
                 _logger.LogInformation($"Existing record: {configDnsRecord.Name}");
