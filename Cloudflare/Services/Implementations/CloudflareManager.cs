@@ -96,12 +96,31 @@ namespace CloudflareDynDns.Cloudflare.Services.Implementations
             else
             {
                 _logger.LogInformation($"New record: {configDnsRecord.Name}");
-                await CreateNewDnsRecord(configDnsRecord, ipAddressChanged);
+                await CreateNewDnsRecord(configDnsRecord);
             }
         }
 
-        private async Task CreateNewDnsRecord(CloudflareSubdomain configDnsRecord, bool ipAddressChanged)
+        private async Task CreateNewDnsRecord(CloudflareSubdomain configDnsRecord)
         {
+            _logger.LogInformation($"Creating a new Subdomain record {configDnsRecord.Name} with public ip: {PublicIP}");
+
+            var response = await _cloudflareApi.Post<PatchDnsZoneResponse>($"zones/{_config.ZoneId}/dns_records", new {
+                content = PublicIP,
+                name = configDnsRecord.Name,
+                proxied = configDnsRecord.Proxied,
+                type = "A",
+                comment = $"CloudflareDynDNS .NET tool rocks!",
+                ttl = _config.TTL
+            }, _headers);
+
+            if (response.Success)
+            {
+                _logger.LogInformation($"Successfully created {configDnsRecord.Name} with ip address {PublicIP}!");
+            }
+            else
+            {
+                _logger.LogError($"Failure during creation of new DNS entry {configDnsRecord.Name}, will retry after {_config.TTL} seconds!");
+            }
         }
 
         private async Task UpdateExistingDnsRecord(DnsRecord existingDnsRecord, CloudflareSubdomain configDnsRecord, bool ipAddressChanged)

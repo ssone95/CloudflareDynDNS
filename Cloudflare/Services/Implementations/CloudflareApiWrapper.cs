@@ -27,47 +27,32 @@ namespace CloudflareDynDns.Cloudflare.Services.Implementations
         SemaphoreSlim _semaphore = new(1, 1);
         public async Task<T> Get<T>(string endpoint, Dictionary<string, string> headers = null) where T : BaseResponse
         {
-            T response;
-            try
-            {
-                await _semaphore.WaitAsync();
-                var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
-                if (headers != null)
-                {
-                    foreach (var header in headers)
-                    {
-                        request.Headers.Add(header.Key, header.Value);
-                    }
-                }
-                request.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
-                var httpResponse = await _client.SendAsync(request);
-                if ((int)httpResponse.StatusCode >= 200 && (int)httpResponse.StatusCode < 500)
-                {
-                    var jsonContent = await httpResponse.Content.ReadAsStringAsync();
-                    response = JsonConvert.DeserializeObject<T>(jsonContent);
-                }
-                else
-                {
-                    response = CreateErrorResponse<T>($"Cloudflare API is currently not available. StatusCode: {httpResponse.StatusCode}");
-                }
-                _semaphore.Release();
-            }
-            catch (Exception ex)
-            {
-                _semaphore.Release();
-                _logger.LogError($"{ex}");
-                response = CreateErrorResponse<T>($"Cloudflare API is currently not available. Error: {ex}");
-            }
-            return response;
+            return await ProcessRequest<T>(endpoint, HttpMethod.Get, null, headers);
+        }
+        public async Task<T> Patch<T>(string endpoint, Dictionary<string, string> properties, Dictionary<string, string> headers = null) where T : BaseResponse
+        {
+            return await ProcessRequest<T>(endpoint, HttpMethod.Patch, properties, headers);
+        }
+        public async Task<T> Post<T>(string endpoint, object dataToTransfer = null, Dictionary<string, string> headers = null) where T : BaseResponse
+        {
+            return await ProcessRequest<T>(endpoint, HttpMethod.Post, dataToTransfer, headers);
+        }
+        public async Task<T> Put<T>(string endpoint, object dataToTransfer = null, Dictionary<string, string> headers = null) where T : BaseResponse
+        {
+            return await ProcessRequest<T>(endpoint, HttpMethod.Put, dataToTransfer, headers);
+        }
+        public async Task<T> Delete<T>(string endpoint, object dataToTransfer = null, Dictionary<string, string> headers = null) where T : BaseResponse
+        {
+            return await ProcessRequest<T>(endpoint, HttpMethod.Delete, dataToTransfer, headers);
         }
 
-        public async Task<T> Patch<T>(string endpoint, Dictionary<string, string> properties, Dictionary<string, string> headers = null) where T : BaseResponse
+        private async Task<T> ProcessRequest<T>(string endpoint, HttpMethod method, object dataToTransfer = null, Dictionary<string, string> headers = null) where T : BaseResponse
         {
             T response;
             try
             {
                 await _semaphore.WaitAsync();
-                var request = new HttpRequestMessage(HttpMethod.Patch, endpoint);
+                var request = new HttpRequestMessage(method, endpoint);
                 if (headers != null)
                 {
                     foreach (var header in headers)
@@ -77,9 +62,12 @@ namespace CloudflareDynDns.Cloudflare.Services.Implementations
                 }
                 request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
-                string jsonRequestContent = JsonConvert.SerializeObject(properties);
-                request.Content = new StringContent(jsonRequestContent, new MediaTypeHeaderValue("application/json"));
-                
+                if (dataToTransfer != null) 
+                {
+                    string jsonRequestContent = JsonConvert.SerializeObject(dataToTransfer);
+                    request.Content = new StringContent(jsonRequestContent, new MediaTypeHeaderValue("application/json"));
+                }
+
                 var httpResponse = await _client.SendAsync(request);
                 if ((int)httpResponse.StatusCode >= 200 && (int)httpResponse.StatusCode < 500)
                 {
