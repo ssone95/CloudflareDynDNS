@@ -25,25 +25,23 @@ namespace CloudflareDynDns.Cloudflare.Messages.MediatR.Handlers
 
         public async Task<InitializeCloudflareManagerResponse> Handle(InitializeCloudflareManagerRequest request, CancellationToken cancellationToken)
         {
-            await _manager.LoadConfiguration();
             if (!_manager.CanHandleRequests) 
             {
                 return new(false);
             }
 
             var publicIp = await _manager.RefreshPublicIPAddress();
-            _logger.LogInformation($"Using '{publicIp}' as publicly available IP Address...");
+            _logger.Log(LogLevel.None, $"Using '{publicIp.ipAddress}' as publicly available IP Address...");
 
             bool tokenValidationSucceeded = await _manager.VerifyCloudflareToken();
-            _logger.LogInformation($"Token validated: {tokenValidationSucceeded}");
+            _logger.Log(LogLevel.None, $"Token validated: {tokenValidationSucceeded}");
 
-            var isEverythingOk = IsEverythingValidAtStartup(publicIp.ipAddress, _manager.LoadedConfiguration, tokenValidationSucceeded);
+            var isEverythingOk = IsEverythingValidAtStartup(publicIp.ipAddress, tokenValidationSucceeded);
             return new(isEverythingOk);
         }
 
-        private bool IsEverythingValidAtStartup(string publicIp, bool loadedConfiguration, bool tokenValidated) => 
+        private bool IsEverythingValidAtStartup(string publicIp, bool tokenValidated) => 
             !string.IsNullOrEmpty(publicIp) 
-            && loadedConfiguration
             && tokenValidated;
     }
 }

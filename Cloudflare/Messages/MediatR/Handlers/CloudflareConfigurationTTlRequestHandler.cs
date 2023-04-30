@@ -23,7 +23,7 @@ namespace CloudflareDynDns.Cloudflare.Messages.MediatR.Handlers
         }
         public async Task<CloudflareConfigurationTTLResponse> Handle(CloudflareConfigurationTTLRequest request, CancellationToken cancellationToken)
         {
-            return new(_manager.GetTTL());
+            return new(_manager.GetRefreshIntervalSeconds());
         }
     }
 }

@@ -4,6 +4,7 @@ using CloudflareDynDns.Cloudflare.Messages;
 using CloudflareDynDns.Cloudflare.Models;
 using CloudflareDynDns.Cloudflare.Responses;
 using CloudflareDynDns.Cloudflare.Services.Interfaces;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 
@@ -13,15 +14,18 @@ namespace CloudflareDynDns.Cloudflare.Services.Implementations
     {
         private readonly HttpClient _client;
         private readonly ILogger<CloudflareApiWrapper> _logger;
+        private readonly IConfiguration _configuration;
+        private CloudflareConfiguration _config => _configuration.Get<CloudflareConfiguration>();
         private const string _apiBaseAddress = "https://api.cloudflare.com/client/v4/";
-        public CloudflareApiWrapper(ILogger<CloudflareApiWrapper> logger)
+        public CloudflareApiWrapper(ILogger<CloudflareApiWrapper> logger, IConfiguration configuration)
         {
+            _logger = logger;
+            _configuration = configuration;
             _client = new()
             {
-                Timeout = TimeSpan.FromSeconds(30),
+                Timeout = TimeSpan.FromSeconds(_config.RequestTimeoutSeconds),
                 BaseAddress = new Uri(_apiBaseAddress)
             };
-            _logger = logger;
         }
 
         SemaphoreSlim _semaphore = new(1, 1);

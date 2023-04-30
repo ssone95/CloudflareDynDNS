@@ -5,6 +5,7 @@ using CloudflareDynDns.Cloudflare.Models;
 using CloudflareDynDns.Cloudflare.Models.ResponseModels;
 using CloudflareDynDns.Cloudflare.Responses;
 using CloudflareDynDns.Cloudflare.Services.Interfaces;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
@@ -17,38 +18,26 @@ namespace CloudflareDynDns.Cloudflare.Services.Implementations
         private readonly ICloudflareApiWrapper _cloudflareApi;
         private readonly ILogger<CloudflareManager> _logger;
         private readonly IHostApplicationLifetime _applicationLifetime;
-        private CloudflareConfiguration _config = null;
+        private readonly IConfiguration _configuration;
 
         private Dictionary<string, string> _headers;
         private string _publicIP = string.Empty;
         public string PublicIP => _publicIP;
-        private bool _loadedConfiguration;
-        private bool _canAcceptRequests;
-        public bool LoadedConfiguration => _loadedConfiguration;
-        public bool CanHandleRequests => _canAcceptRequests && LoadedConfiguration;
 
-        public CloudflareManager(ILogger<CloudflareManager> logger, ICloudflareApiWrapper cloudflareApi, IHostApplicationLifetime applicationLifetime)
+        public bool CanHandleRequests { get; private set; }
+
+        private CloudflareConfiguration _config => _configuration.Get<CloudflareConfiguration>();
+
+        public CloudflareManager(ILogger<CloudflareManager> logger, ICloudflareApiWrapper cloudflareApi, IHostApplicationLifetime applicationLifetime, 
+            IConfiguration configuration)
         {
             _httpClient = new();
             _cloudflareApi = cloudflareApi;
             _logger = logger;
             _applicationLifetime = applicationLifetime;
-        }
-        public async Task LoadConfiguration(string configurationFile = "config.json")
-        {
-            if (_loadedConfiguration) return;
+            _configuration = configuration;
 
-            string jsonString = await File.ReadAllTextAsync("config.json");
-            if (string.IsNullOrEmpty(jsonString)) 
-            {
-                _logger.LogError($"Configuration could not be loaded!");
-                _loadedConfiguration = false;
-            }
-            _config = await Task.Run(() => JsonConvert.DeserializeObject<CloudflareConfiguration>(jsonString));
-            _logger.LogInformation($"Loaded Cloudflare configuration!");
-
-            _loadedConfiguration = true;
-            _canAcceptRequests = true;
+            CanHandleRequests = true;
         }
         public async Task<bool> VerifyCloudflareToken()
         {
@@ -69,15 +58,16 @@ namespace CloudflareDynDns.Cloudflare.Services.Implementations
 
         public async Task<bool> RefreshDNSRecords() 
         {
+            _logger.Log(LogLevel.None, $"Processing DNS records from the configuration...");
             var refreshResult = await RefreshPublicIPAddress();
 
-            var zoneExists = await CheckIfZoneExistsAsync(_config.ZoneId);
+            var zoneExists = await CheckIfZoneExistsAsync(_config.Zone.ZoneId);
             if (!zoneExists) return false;
 
-            var existingDnsRecords = await GetExistingDnsRecordsAsync(_config.ZoneId);
+            var existingDnsRecords = await GetExistingDnsRecordsAsync(_config.Zone.ZoneId);
             if (existingDnsRecords?.Success != true) return false;
 
-            foreach (var configDnsRecord in _config.Subdomains)
+            foreach (var configDnsRecord in _config.Zone.Subdomains)
             {
                 await ProcessDnsRecordRefresh(existingDnsRecords, configDnsRecord, refreshResult.requiresDnsRefresh);
             }
@@ -104,13 +94,13 @@ namespace CloudflareDynDns.Cloudflare.Services.Implementations
         {
             _logger.LogInformation($"Creating a new Subdomain record {configDnsRecord.Name} with public ip: {PublicIP}");
 
-            var response = await _cloudflareApi.Post<PatchDnsZoneResponse>($"zones/{_config.ZoneId}/dns_records", new {
+            var response = await _cloudflareApi.Post<PatchDnsZoneResponse>($"zones/{_config.Zone.ZoneId}/dns_records", new {
                 content = PublicIP,
                 name = configDnsRecord.Name,
                 proxied = configDnsRecord.Proxied,
                 type = "A",
                 comment = $"CloudflareDynDNS .NET tool rocks!",
-                ttl = _config.TTL
+                ttl = configDnsRecord.TTL
             }, _headers);
 
             if (response.Success)
@@ -119,25 +109,26 @@ namespace CloudflareDynDns.Cloudflare.Services.Implementations
             }
             else
             {
-                _logger.LogError($"Failure during creation of new DNS entry {configDnsRecord.Name}, will retry after {_config.TTL} seconds!");
+                _logger.LogError($"Failure during creation of new DNS entry {configDnsRecord.Name}, will retry after {_config.RefreshTimeSeconds} seconds!");
             }
         }
 
         private async Task UpdateExistingDnsRecord(DnsRecord existingDnsRecord, CloudflareSubdomain configDnsRecord, bool ipAddressChanged)
         {
             var now = DateTime.UtcNow;
-            var shouldBeUpdatedOn = existingDnsRecord.ModifiedOn.Add(TimeSpan.FromSeconds(_config.TTL));
+            var shouldBeUpdatedOn = existingDnsRecord.ModifiedOn.Add(TimeSpan.FromSeconds(configDnsRecord.TTL));
 
             if (shouldBeUpdatedOn < now || existingDnsRecord.Content != PublicIP || ipAddressChanged)
             {
                 _logger.LogInformation($"Updating Subdomain {configDnsRecord.Name} - previous update on {existingDnsRecord.ModifiedOn}, " +
                     $"public ip - old: {existingDnsRecord.Content}, new: {PublicIP}");
                 
-                var response = await _cloudflareApi.Patch<PatchDnsZoneResponse>($"zones/{_config.ZoneId}/dns_records/{existingDnsRecord.Id}", new() {
+                var response = await _cloudflareApi.Patch<PatchDnsZoneResponse>($"zones/{_config.Zone.ZoneId}/dns_records/{existingDnsRecord.Id}", new() {
                     { "content", PublicIP },
                     { "name", existingDnsRecord.Name },
                     { "type", existingDnsRecord.Type },
-                    { "comment", $"CloudflareDynDNS .NET tool rocks!" }
+                    { "comment", $"CloudflareDynDNS .NET tool rocks!" },
+                    { "ttl", configDnsRecord.TTL.ToString() }
                 }, _headers);
                 if (response.Success)
                 {
@@ -145,7 +136,7 @@ namespace CloudflareDynDns.Cloudflare.Services.Implementations
                 }
                 else
                 {
-                    _logger.LogError($"Failure during updating bound ip for {configDnsRecord.Name}, will retry after {_config.TTL} seconds!");
+                    _logger.LogError($"Failure during updating bound ip for {configDnsRecord.Name}, will retry after {_config.RefreshTimeSeconds} seconds!");
                 }
             }
             else
@@ -197,7 +188,7 @@ namespace CloudflareDynDns.Cloudflare.Services.Implementations
                 bool arePreviousAndNewIpEqual = prevPublicIp != PublicIP;
                 if (arePreviousAndNewIpEqual) 
                 {
-                    _logger.LogInformation($"Public IP changed (old: {prevPublicIp}, new: {PublicIP}), refreshing DNS configuration...");
+                    _logger.Log(LogLevel.None, $"Public IP changed (old: {prevPublicIp}, new: {PublicIP}), refreshing DNS configuration...");
                 }
                 return (arePreviousAndNewIpEqual, PublicIP);
             }
@@ -239,11 +230,12 @@ namespace CloudflareDynDns.Cloudflare.Services.Implementations
             return string.Empty;
         }
 
-        public int GetTTL() => _config.TTL;
+        public int GetRefreshIntervalSeconds() => _config.RefreshTimeSeconds;
+        public int GetRequestTimeoutSeconds() => _config.RequestTimeoutSeconds;
 
         public void StopProcessingRequests()
         {
-            _canAcceptRequests = false;
+            CanHandleRequests = false;
             _applicationLifetime.StopApplication();
         }
     }

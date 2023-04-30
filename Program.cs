@@ -13,7 +13,12 @@ namespace CloudflareDynDns
     {
         public static void Main(string[] args)
         {
-            CreateHostBuilder(args).Build().Run();
+            var host = CreateHostBuilder(args);
+            host.UseSerilog((hostContext, services, configuration) => {
+                configuration.ReadFrom.Configuration(hostContext.Configuration);
+            });
+            
+            host.Build().Run();
         }
 
         public static IHostBuilder CreateHostBuilder(string[] args) =>
@@ -26,11 +31,11 @@ namespace CloudflareDynDns
                 .ConfigureAppConfiguration((context, config) =>
                 {
                     var env = context.HostingEnvironment;
-                    config.AddJsonFile("appsettings.json", optional: true, reloadOnChange: false);
-                    config.AddJsonFile($"appsettings.{env.EnvironmentName}.json", optional: true, reloadOnChange: false);
+                    config.AddJsonFile("appsettings.json", optional: true, reloadOnChange: true);
+                    config.AddJsonFile($"appsettings.{env.EnvironmentName}.json", optional: true, reloadOnChange: true);
+                    config.AddJsonFile("config.json", optional: false, reloadOnChange: true);
                     config.AddEnvironmentVariables();
                 })
-                .UseSerilog((ctx, lc) => lc.WriteTo.Console())
                 .ConfigureServices(ConfigureServices)
                 .ConfigureServices((hostContext, services) =>
                 {

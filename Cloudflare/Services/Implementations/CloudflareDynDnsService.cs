@@ -11,16 +11,20 @@ namespace CloudflareDynDns.Cloudflare.Services.Implementations
     {
         private readonly IMediator _mediator;
         private readonly ILogger<CloudflareDynDnsService> _logger;
+        private readonly IHostingEnvironment _env;
 
         private bool _isRunning;
-        public CloudflareDynDnsService(IMediator mediator, ILogger<CloudflareDynDnsService> logger)
+        public CloudflareDynDnsService(IMediator mediator, ILogger<CloudflareDynDnsService> logger, IHostingEnvironment env)
         {
             _mediator = mediator;
             _logger = logger;
+            _env = env;
         }
 
         public async Task StartAsync(CancellationToken cancellationToken)
         {
+            _logger.LogInformation($"Running in {_env.EnvironmentName} environment!");
+            _logger.Log(LogLevel.None, "Testing");
             var response = await _mediator.Send(new InitializeCloudflareManagerRequest());
 
             if (!response.Success)
@@ -36,13 +40,12 @@ namespace CloudflareDynDns.Cloudflare.Services.Implementations
         private async Task MainLoop()
         {
             var ttlResponse = await _mediator.Send(new CloudflareConfigurationTTLRequest());
-            _logger.LogInformation($"Processing Subdomains from the configuration...");
             while (_isRunning)
             {
                 var result = await _mediator.Send(new UpdateDNSRecordsRequest());
                 if (result.Success) 
                 {
-                    _logger.LogInformation($"Successfully processed DNS records update!");
+                    _logger.Log(LogLevel.None, $"Successfully processed DNS records update!");
                 }
                 else
                 {
